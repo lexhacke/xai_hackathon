@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Mem0 Assistant - With Voice Output</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .status.disconnected {
+            background: #fee;
+            color: #c33;
+        }
+
+        .status.connected {
+            background: #efe;
+            color: #3c3;
+        }
+
+        .status.speaking {
+            background: #e3f2fd;
+            color: #2196F3;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-start {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-start:hover:not(:disabled) {
+            background: #45a049;
+        }
+
+        .btn-stop {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: #da190b;
+        }
+
+        .transcript {
+            background: #f9f9f9;
+            border-radius: 10px;
+            padding: 20px;
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+
+        .transcript-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .user-message {
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+        }
+
+        .assistant-message {
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+        }
+
+        .function-call {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .examples {
+            background: #f5f5f5;
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .examples h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .examples ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .examples li {
+            padding: 8px 0;
+            color: #666;
+        }
+
+        .examples li:before {
+            content: "🎤 ";
+        }
+
+        .speaker-indicator {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 48px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 Voice Mem0 Assistant</h1>
+        <p class="subtitle">🔊 Now with voice output!</p>
+
+        <div id="status" class="status disconnected">
+            🔴 Disconnected
+        </div>
+
+        <div class="speaker-indicator" id="speaker">
+            🔇
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn-start" onclick="start()">
+                🎤 Start Talking
+            </button>
+            <button id="stopBtn" class="btn-stop" onclick="stop()" disabled>
+                ⏹️ Stop
+            </button>
+        </div>
+
+        <div id="transcript" class="transcript">
+            <div style="text-align: center; color: #999; padding: 40px;">
+                Press "Start Talking" to begin!<br>
+                <small>You'll hear the AI speak back to you!</small>
+            </div>
+        </div>
+
+        <div class="examples">
+            <h3>💡 Example Questions:</h3>
+            <ul>
+                <li>"What did I see in the video about cars?"</li>
+                <li>"Show me my recent memories"</li>
+                <li>"Search for memories about people"</li>
+                <li>"What was that thing with the red building?"</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let audioWorkletNode = null;
+        let audioQueue = [];
+        let isPlaying = false;
+
+        const statusDiv = document.getElementById('status');
+        const transcriptDiv = document.getElementById('transcript');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const speakerIcon = document.getElementById('speaker');
+
+        function addTranscript(text, type = 'user') {
+            const div = document.createElement('div');
+            div.className = `transcript-item ${type}-message`;
+            div.textContent = text;
+            transcriptDiv.appendChild(div);
+            transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+        }
+
+        // Audio playback functions
+        async function playAudioChunk(base64Audio) {
+            try {
+                // Decode base64 to ArrayBuffer
+                const binaryString = atob(base64Audio);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Convert Int16 PCM to Float32
+                const int16Array = new Int16Array(bytes.buffer);
+                const float32Array = new Float32Array(int16Array.length);
+                for (let i = 0; i < int16Array.length; i++) {
+                    float32Array[i] = int16Array[i] / 32768.0;
+                }
+
+                // Create audio buffer
+                const audioBuffer = audioContext.createBuffer(1, float32Array.length, 24000);
+                audioBuffer.getChannelData(0).set(float32Array);
+
+                // Play
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+
+                return new Promise((resolve) => {
+                    source.onended = resolve;
+                    source.start();
+                    speakerIcon.textContent = '🔊';
+                    statusDiv.textContent = '🗣️ AI Speaking...';
+                    statusDiv.className = 'status speaking';
+                });
+            } catch (error) {
+                console.error('Audio playback error:', error);
+            }
+        }
+
+        async function processAudioQueue() {
+            if (isPlaying || audioQueue.length === 0) return;
+
+            isPlaying = true;
+            while (audioQueue.length > 0) {
+                const audioData = audioQueue.shift();
+                await playAudioChunk(audioData);
+            }
+            isPlaying = false;
+            speakerIcon.textContent = '🔇';
+            statusDiv.textContent = '🟢 Connected - Listening...';
+            statusDiv.className = 'status connected';
+        }
+
+        async function start() {
+            try {
+                // Initialize audio context for playback
+                if (!audioContext) {
+                    audioContext = new AudioContext({ sampleRate: 24000 });
+                }
+
+                // Connect to WebSocket
+                ws = new WebSocket('ws://localhost:8000/ws');
+
+                ws.onopen = async () => {
+                    statusDiv.textContent = '🟢 Connected - Listening...';
+                    statusDiv.className = 'status connected';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+
+                    transcriptDiv.innerHTML = '';
+                    addTranscript('✅ Connected! Start speaking...', 'assistant');
+
+                    // Start microphone
+                    await startMicrophone();
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    // Handle different event types (EXACTLY like working client.html)
+                    if (data.type === 'conversation.item.input_audio_transcription.completed') {
+                        addTranscript(`You: ${data.transcript}`, 'user');
+                    } else if (data.type === 'response.output_audio_transcript.delta') {
+                        const lastMsg = transcriptDiv.lastChild;
+                        if (lastMsg && lastMsg.classList.contains('assistant-message')) {
+                            lastMsg.textContent += data.delta;
+                        } else {
+                            addTranscript(data.delta, 'assistant');
+                        }
+                    } else if (data.type === 'response.function_call_arguments.done') {
+                        const args = JSON.parse(data.arguments);
+                        addTranscript(`🔧 Function: ${data.name}(${JSON.stringify(args)})`, 'function-call');
+                    }
+                    // ADDITIONAL: Handle AI audio output for voice playback
+                    else if (data.type === 'response.output_audio.delta') {
+                        if (data.delta) {
+                            audioQueue.push(data.delta);
+                            processAudioQueue();
+                        }
+                    }
+                    // ADDITIONAL: Handle audio done
+                    else if (data.type === 'response.output_audio.done') {
+                        speakerIcon.textContent = '🔇';
+                        statusDiv.textContent = '🟢 Connected - Listening...';
+                        statusDiv.className = 'status connected';
+                    }
+                };
+
+                ws.onclose = () => {
+                    statusDiv.textContent = '🔴 Disconnected';
+                    statusDiv.className = 'status disconnected';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    speakerIcon.textContent = '🔇';
+                    stopMicrophone();
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    addTranscript('❌ Connection error', 'assistant');
+                };
+
+            } catch (error) {
+                console.error('Start error:', error);
+                alert('Failed to start: ' + error.message);
+            }
+        }
+
+        async function startMicrophone() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                // Create audio processor
+                await audioContext.audioWorklet.addModule(
+                    'data:text/javascript,' + encodeURIComponent(`
+                        class AudioProcessor extends AudioWorkletProcessor {
+                            process(inputs, outputs) {
+                                const input = inputs[0];
+                                if (input.length > 0) {
+                                    const channelData = input[0];
+                                    const int16Data = new Int16Array(channelData.length);
+                                    for (let i = 0; i < channelData.length; i++) {
+                                        const s = Math.max(-1, Math.min(1, channelData[i]));
+                                        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                                    }
+                                    this.port.postMessage(int16Data.buffer, [int16Data.buffer]);
+                                }
+                                return true;
+                            }
+                        }
+                        registerProcessor('audio-processor', AudioProcessor);
+                    `)
+                );
+
+                audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+
+                audioWorkletNode.port.onmessage = (event) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const base64Audio = btoa(String.fromCharCode(...new Uint8Array(event.data)));
+                        ws.send(JSON.stringify({
+                            type: 'input_audio_buffer.append',
+                            audio: base64Audio
+                        }));
+                    }
+                };
+
+                source.connect(audioWorkletNode);
+                audioWorkletNode.connect(audioContext.destination);
+
+                console.log('✅ Microphone started');
+            } catch (error) {
+                console.error('Microphone error:', error);
+                alert('Microphone access denied: ' + error.message);
+            }
+        }
+
+        function stopMicrophone() {
+            if (audioWorkletNode) {
+                audioWorkletNode.disconnect();
+                audioWorkletNode = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+        }
+
+        function stop() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            stopMicrophone();
+            audioQueue = [];
+            speakerIcon.textContent = '🔇';
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', stop);
+    </script>
+</body>
+</html>
