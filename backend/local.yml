@@ -1,0 +1,46 @@
+# Local development compose for testing video streaming
+# Usage: docker compose -f docker-compose.yml -f local.yml up --build
+
+services:
+  backend:
+    build:
+      context: .
+    container_name: jarvis-backend-local
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=local
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+    command: bash -c "uv pip install -e . && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - .:/app
+      - venv-local:/app/.venv  # Preserve container's venv with named volume
+    networks:
+      - default
+
+  db:
+    image: postgres:15
+    container_name: jarvis-db-local
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=jarvis
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  default:
+
+volumes:
+  postgres-local:
+  venv-local:
